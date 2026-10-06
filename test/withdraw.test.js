@@ -24,6 +24,7 @@ const repo = await import('../src/db/repo.js');
 const { closeDb } = await import('../src/db/index.js');
 const { withdrawCommand, reconcileCommand } = await import('../src/commands/withdraw.js');
 const { depositAddressCommand } = await import('../src/commands/deposit.js');
+const { checkAddressCommand } = await import('../src/commands/address.js');
 
 repo.addAddress({
   label: 'cold',
@@ -203,4 +204,25 @@ test('every guarded action left an audit trail', () => {
   const actions = repo.recentAudit(100).map((r) => r.action);
   assert.ok(actions.includes('deposit.address'));
   assert.ok(actions.includes('withdraw.reconcile'));
+});
+
+test('address check finds a saved address and past OKX payouts to it', async () => {
+  mock.withdrawals.set('paid-1', {
+    wdId: '88001', clientId: 'paid-1', ccy: 'USDT', chain: 'USDT-TRC20',
+    amt: '40', fee: '0.8', to: 'TQn9Y2khEsLJW1ChVWFMSMeRDow5KcbLSE', state: '2', txId: '0xpaid', ts: '1700000000000',
+  });
+  const res = await checkAddressCommand('TQn9Y2khEsLJW1ChVWFMSMeRDow5KcbLSE', { ccy: 'usdt' });
+  assert.deepEqual(res.local.map((a) => a.label), ['cold']);
+  assert.ok(res.okxHistory.some((r) => r.wdId === '88001'));
+});
+
+test('address check reports an unknown address as absent everywhere', async () => {
+  const res = await checkAddressCommand('TUnknownAddressNeverUsed');
+  assert.equal(res.local.length, 0);
+  assert.equal(res.okxHistory.length, 0);
+});
+
+test('address check ignores case for EVM addresses and respects --chain', async () => {
+  assert.equal((await checkAddressCommand('0XPOLY')).local.length, 1);
+  assert.equal((await checkAddressCommand('0xpoly', { chain: 'USDT-TRC20' })).local.length, 0);
 });

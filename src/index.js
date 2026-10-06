@@ -11,7 +11,7 @@ import { depositAddressCommand, depositHistoryCommand } from './commands/deposit
 import { withdrawalHistoryCommand } from './commands/history.js';
 import { balanceCommand, currenciesCommand, doctorCommand } from './commands/account.js';
 import { setupCommand, keygenCommand, authStatusCommand, authTestCommand, auditCommand } from './commands/auth.js';
-import { addAddressCommand, listAddressCommand, removeAddressCommand } from './commands/address.js';
+import { addAddressCommand, listAddressCommand, removeAddressCommand, checkAddressCommand } from './commands/address.js';
 
 const program = new Command();
 
@@ -106,6 +106,12 @@ address
   .action((opts) => addAddressCommand(opts));
 
 address.command('list').description('list saved destinations').action(() => listAddressCommand());
+address
+  .command('check <address>')
+  .description('check an address against the local book and past OKX withdrawals (read-only)')
+  .option('-C, --ccy <ccy>', 'restrict to one currency')
+  .option('-c, --chain <chain>', 'restrict to one network')
+  .action((addr, opts) => checkAddressCommand(addr, opts));
 address.command('remove <label>').description('remove a destination').action((l) => removeAddressCommand(l));
 
 /* -------------------------------------------------------------- account */

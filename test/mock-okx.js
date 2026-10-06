@@ -83,6 +83,7 @@ export function startMockOkx({ overrides = {} } = {}) {
         case 'GET /api/v5/asset/withdrawal-history': {
           const clientId = params.get('clientId');
           const wdId = params.get('wdId');
+          if (!clientId && !wdId) return send(200, ok([...MOCK_WD.values()]));
           if (clientId && !MOCK_WD.has(clientId)) return send(200, ok([]));
           const rec = clientId ? MOCK_WD.get(clientId) : [...MOCK_WD.values()].find((r) => r.wdId === wdId);
           return send(200, ok(rec ? [rec] : []));

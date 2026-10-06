@@ -11,9 +11,11 @@
   },
   "scripts": {
     "start": "node src/index.js",
+    "chat": "node src/chat.js",
     "test": "node --test \"test/*.test.js\""
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
     "@inquirer/prompts": "^7.2.1",
     "commander": "^13.0.0",
     "dotenv": "^16.4.7",

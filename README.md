@@ -87,7 +87,12 @@ your factors:
 kox address add --label cold --ccy USDT --chain USDT-TRC20 \
                 --addr TQn9Y2khEsLJW1ChVWFMSMeRDow5KcbLSE
 kox address list
+kox address check TQn9Y2khEsLJW1ChVWFMSMeRDow5KcbLSE     # saved locally? paid out to before by OKX?
 ```
+
+OKX's API has no endpoint for reading your exchange-side withdrawal whitelist, so `address check`
+uses your OKX withdrawal history as evidence instead: an address OKX has already paid out to was on
+the whitelist at that time. To be certain, check Assets → Withdraw → Address book in OKX.
 
 Then:
 
