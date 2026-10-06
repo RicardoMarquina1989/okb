@@ -1,5 +1,11 @@
 import { okx } from './client.js';
 
+/** Account type codes used by POST /api/v5/asset/transfer. */
+export const ACCOUNT = {
+  funding: '6',
+  trading: '18',
+};
+
 /** Withdrawal destination codes used by POST /api/v5/asset/withdrawal. */
 export const DEST = {
   internal: '3', // OKX-to-OKX transfer (email / phone / account id)
@@ -104,6 +110,16 @@ export function getWithdrawalHistory({ ccy, wdId, clientId, txId, state, limit =
   });
 }
 
+/** How much of a currency can leave the trading account right now (excludes margin in use). */
+export function getMaxTransferable(ccy) {
+  return okx().get('/api/v5/account/max-withdrawal', { ccy });
+}
+
+/** State of an internal transfer, looked up by OKX transId or our clientId. */
+export function getTransferState({ transId, clientId }) {
+  return okx().get('/api/v5/asset/transfer-state', { transId, clientId });
+}
+
 /** Account metadata — used as a cheap credential/connectivity probe. */
 export function getAccountConfig() {
   return okx().get('/api/v5/account/config');
@@ -122,6 +138,18 @@ export function submitWithdrawal({ ccy, amt, dest, toAddr, chain, fee, clientId,
   if (clientId) body.clientId = clientId;
   if (areaCode) body.areaCode = areaCode;
   return okx().post('/api/v5/asset/withdrawal', body, { retryable: false });
+}
+
+/**
+ * Move funds between the user's own funding and trading accounts. Never retried
+ * automatically, for the same reason as submitWithdrawal.
+ */
+export function submitTransfer({ ccy, amt, from, to, clientId }) {
+  return okx().post(
+    '/api/v5/asset/transfer',
+    { ccy, amt: String(amt), from, to, type: '0', clientId },
+    { retryable: false },
+  );
 }
 
 export function cancelWithdrawal(wdId) {

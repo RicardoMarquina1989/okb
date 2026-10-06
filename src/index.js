@@ -9,6 +9,7 @@ import { ApprovalError } from './auth/gate.js';
 import { withdrawCommand, reconcileCommand, statusCommand, cancelCommand } from './commands/withdraw.js';
 import { depositAddressCommand, depositHistoryCommand } from './commands/deposit.js';
 import { withdrawalHistoryCommand } from './commands/history.js';
+import { transferCommand } from './commands/transfer.js';
 import { balanceCommand, currenciesCommand, doctorCommand } from './commands/account.js';
 import { setupCommand, keygenCommand, authStatusCommand, authTestCommand, auditCommand } from './commands/auth.js';
 import { addAddressCommand, listAddressCommand, removeAddressCommand, checkAddressCommand } from './commands/address.js';
@@ -55,7 +56,7 @@ const withdraw = program
 withdraw
   .command('send', { isDefault: true })
   .description('submit a withdrawal')
-  .requiredOption('-a, --amount <amount>', 'amount in the currency being withdrawn')
+  .requiredOption('-a, --amount <amount>', 'amount in the currency being withdrawn, or "max" for everything available')
   .option('-l, --label <label>', 'destination from the address book')
   .option('-t, --to <address>', 'destination address (must be in the address book)')
   .option('-C, --ccy <ccy>', 'currency, required with --to')
@@ -63,6 +64,7 @@ withdraw
   .option('-m, --memo <memo>', 'memo / tag / payment id, if the chain needs one')
   .option('-f, --fee <fee>', 'network fee (defaults to the chain minimum)')
   .option('-d, --dest <dest>', 'onchain | internal', 'onchain')
+  .option('--no-top-up', 'do not move a shortfall from the trading account first')
   .option('--dry-run', 'validate and print, submit nothing')
   .action((opts) => withdrawCommand(opts));
 
@@ -113,6 +115,19 @@ address
   .option('-c, --chain <chain>', 'restrict to one network')
   .action((addr, opts) => checkAddressCommand(addr, opts));
 address.command('remove <label>').description('remove a destination').action((l) => removeAddressCommand(l));
+
+/* ------------------------------------------------------------- transfer */
+
+program
+  .command('transfer')
+  .description('move funds between your own trading and funding accounts')
+  .requiredOption('-C, --ccy <ccy>', 'currency')
+  .requiredOption('-a, --amount <amount>', 'amount, or "max" for everything the source account can release')
+  .option('--from <account>', 'trading | funding', 'trading')
+  .option('--to <account>', 'trading | funding (defaults to the other one)')
+  .option('-y, --yes', 'skip the confirmation prompt')
+  .option('--dry-run', 'show what would move, move nothing')
+  .action((opts) => transferCommand(opts));
 
 /* -------------------------------------------------------------- account */
 

@@ -6,6 +6,8 @@ import * as repo from '../db/repo.js';
 import * as funding from '../okx/funding.js';
 import { OkxError } from '../okx/client.js';
 import { requireApproval } from '../auth/gate.js';
+import { toUnits, fromUnits, floorTo, ceilTo } from '../util/decimal.js';
+import { transferable, executeTransfer } from './transfer.js';
 
 /** OKX accepts an alphanumeric clientId of up to 32 chars; we use it for idempotency. */
 const newClientId = () => crypto.randomBytes(16).toString('hex');
@@ -118,44 +120,86 @@ export async function withdrawCommand(opts) {
     chainInfo = await funding.getChainInfo(ccy, target.chain);
   }
 
-  validateAmount({ amount: opts.amount, chainInfo, ccy });
+  const wantsMax = String(opts.amount).toLowerCase() === 'max';
+  if (!wantsMax) validateAmount({ amount: opts.amount, chainInfo, ccy });
 
   const fee = isInternal ? undefined : (opts.fee ?? chainInfo?.minFee);
   if (!isInternal && (fee === undefined || fee === '')) {
     throw new Error(`Could not determine a withdrawal fee for ${ccy}/${target.chain}; pass --fee`);
   }
 
-  // Warn early rather than letting OKX reject after the approval ceremony.
+  // OKX pays withdrawals out of the funding account only. Unless --no-top-up is
+  // given, any shortfall is moved over from the trading account first, as part
+  // of the same approval.
+  const dp = Math.min(8, Number.isFinite(Number(chainInfo?.wdTickSz)) ? Number(chainInfo.wdTickSz) : 8);
+  const feeUnits = toUnits(fee ?? '0');
   const [bal] = await funding.getFundingBalances(ccy);
-  const available = Number(bal?.availBal ?? 0);
-  const needed = Number(opts.amount) + Number(fee ?? 0);
-  if (available < needed) {
-    log.warn(
-      `Funding balance is ${available} ${ccy} but this withdrawal needs ${needed} ` +
-        `(${opts.amount} + ${fee ?? 0} fee). OKX will likely reject it.`,
-    );
+  const fundingAvail = toUnits(bal?.availBal ?? '0');
+  let tradingAvail = 0n;
+  if (opts.topUp !== false) {
+    try {
+      tradingAvail = await transferable('trading', ccy);
+    } catch (err) {
+      log.warn(`could not read the trading account balance: ${err.message}`);
+    }
+  }
+
+  let amount = String(opts.amount);
+  if (wantsMax) {
+    // Everything both accounts can release, on the chain's decimal grid, less the fee.
+    const pool = floorTo(fundingAvail, dp) + floorTo(tradingAvail, dp) - feeUnits;
+    if (pool <= 0n) {
+      throw new Error(
+        `Nothing to withdraw: ${fromUnits(fundingAvail + tradingAvail)} ${ccy} available, fee is ${fee ?? 0}`,
+      );
+    }
+    amount = fromUnits(floorTo(pool, dp));
+    validateAmount({ amount, chainInfo, ccy });
+  }
+
+  const needed = toUnits(amount) + feeUnits;
+  let topUp = null;
+  if (needed > fundingAvail) {
+    const shortfall = ceilTo(needed - fundingAvail, dp);
+    if (opts.topUp === false) {
+      log.warn(
+        `Funding balance is ${fromUnits(fundingAvail)} ${ccy} but this withdrawal needs ${fromUnits(needed)} ` +
+          `(${amount} + ${fee ?? 0} fee). OKX will likely reject it.`,
+      );
+    } else if (shortfall > tradingAvail) {
+      throw new Error(
+        `Not enough ${ccy}: funding ${fromUnits(fundingAvail)} + trading ${fromUnits(tradingAvail)} = ` +
+          `${fromUnits(fundingAvail + tradingAvail)}, but this withdrawal needs ${fromUnits(needed)} ` +
+          `(${amount} + ${fee ?? 0} fee). Use --amount max to send everything available.`,
+      );
+    } else {
+      topUp = fromUnits(shortfall);
+    }
   }
 
   const intent = {
     action: 'withdraw',
     ccy,
     chain: isInternal ? 'internal' : target.chain,
-    amount: String(opts.amount),
+    amount,
     toAddr: target.toAddr,
     memo: target.memo ?? null,
     dest: destCode,
     fee: fee ?? null,
+    topUp,
   };
 
   const summary = [
-    `Amount      ${colors.bold}${opts.amount} ${ccy}${colors.reset}`,
+    `Amount      ${colors.bold}${amount} ${ccy}${colors.reset}`,
     `Network     ${isInternal ? 'OKX internal transfer' : target.chain}`,
     `Fee         ${isInternal ? '(none)' : `${fee} ${ccy}`}`,
-    `Total debit ${needed} ${ccy}`,
+    `Total debit ${fromUnits(needed)} ${ccy}`,
     `To          ${target.toAddr}`,
     ...(target.memo ? [`Memo/tag    ${target.memo}`] : []),
     ...(target.label ? [`Saved as    ${target.label}`] : []),
-    `Balance     ${available} ${ccy} available`,
+    `Balance     ${fromUnits(fundingAvail)} ${ccy} funding` +
+      (opts.topUp === false ? '' : ` + ${fromUnits(tradingAvail)} ${ccy} trading`),
+    ...(topUp ? [`Top-up      ${colors.bold}${topUp} ${ccy}${colors.reset} moves trading → funding first`] : []),
   ];
 
   if (opts.dryRun) {
@@ -173,6 +217,9 @@ export async function withdrawCommand(opts) {
     summary,
     requireTypedConfirm: tail,
   });
+
+  // If this fails nothing has been withdrawn; at worst some funds sit in funding.
+  if (topUp) await executeTransfer({ ccy, amt: topUp, from: 'trading', to: 'funding' });
 
   const clientId = newClientId();
   repo.insertWithdrawal({

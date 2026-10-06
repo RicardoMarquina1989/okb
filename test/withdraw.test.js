@@ -25,6 +25,8 @@ const { closeDb } = await import('../src/db/index.js');
 const { withdrawCommand, reconcileCommand } = await import('../src/commands/withdraw.js');
 const { depositAddressCommand } = await import('../src/commands/deposit.js');
 const { checkAddressCommand } = await import('../src/commands/address.js');
+const { transferCommand } = await import('../src/commands/transfer.js');
+const { toUnits, fromUnits } = await import('../src/util/decimal.js');
 
 repo.addAddress({
   label: 'cold',
@@ -225,4 +227,57 @@ test('address check reports an unknown address as absent everywhere', async () =
 test('address check ignores case for EVM addresses and respects --chain', async () => {
   assert.equal((await checkAddressCommand('0XPOLY')).local.length, 1);
   assert.equal((await checkAddressCommand('0xpoly', { chain: 'USDT-TRC20' })).local.length, 0);
+});
+
+/* Mock balances: funding 1500.5 USDT, trading can release 800.1234567 USDT, TRC20 fee 0.8, 6 decimals. */
+
+test('decimal helpers are exact and drop digits past 8 places', () => {
+  assert.equal(fromUnits(toUnits('0.1') + toUnits('0.2')), '0.3');
+  assert.equal(fromUnits(toUnits('825.3051766211363')), '825.30517662');
+  assert.throws(() => toUnits('-5'), /Invalid amount/);
+});
+
+test('a withdrawal within the funding balance needs no top-up', async () => {
+  const res = await dry({ label: 'cold', amount: '100' });
+  assert.equal(res.intent.topUp, null);
+});
+
+test('a withdrawal larger than funding tops up the shortfall from trading', async () => {
+  const res = await dry({ label: 'cold', amount: '2000' });
+  assert.equal(res.intent.topUp, '500.3'); // 2000 + 0.8 fee - 1500.5 funding
+});
+
+test('--amount max sends everything both accounts hold, minus the fee', async () => {
+  const res = await dry({ label: 'cold', amount: 'max' });
+  assert.equal(res.intent.amount, '2299.823456'); // 1500.5 + 800.123456 - 0.8
+  assert.equal(res.intent.topUp, '800.123456');
+});
+
+test('a withdrawal larger than both accounts together is refused', async () => {
+  await assert.rejects(() => dry({ label: 'cold', amount: '2400' }), /Not enough USDT.*--amount max/s);
+});
+
+test('--no-top-up leaves the trading account alone', async () => {
+  const res = await dry({ label: 'cold', amount: '2000', topUp: false });
+  assert.equal(res.intent.topUp, null);
+});
+
+test('transfer max moves everything trading can release, on the currency grid', async () => {
+  const before = mock.transfers.size;
+  const res = await transferCommand({ ccy: 'usdt', amount: 'max', yes: true });
+  assert.equal(res.amt, '800.123456');
+  assert.equal(mock.transfers.size, before + 1);
+  const sent = [...mock.transfers.values()].at(-1);
+  assert.deepEqual([sent.from, sent.to, sent.type, sent.amt], ['18', '6', '0', '800.123456']);
+});
+
+test('transfer refuses more than the source account can release', async () => {
+  await assert.rejects(() => transferCommand({ ccy: 'USDT', amount: '900', yes: true }), /Only 800.1234567 USDT/);
+});
+
+test('transfer dry run moves nothing', async () => {
+  const before = mock.transfers.size;
+  const res = await transferCommand({ ccy: 'USDT', amount: '10', from: 'funding', dryRun: true });
+  assert.equal(res.to, 'trading');
+  assert.equal(mock.transfers.size, before);
 });

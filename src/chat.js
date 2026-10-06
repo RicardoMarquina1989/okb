@@ -41,6 +41,7 @@ const COMMANDS = {
   'address list': {},
   'address check': {},
   'address remove': { terminal: true },
+  transfer: { terminal: (args) => !args.includes('--yes') && !args.includes('--dry-run') },
   balance: {},
   currencies: {},
   doctor: {},
@@ -201,13 +202,15 @@ async function handleToolUse(block) {
 const SYSTEM = `You operate kox, a terminal bot for the user's OKX funding account, on their behalf. The user talks to you in plain language (often non-native English) and you turn each request into kox commands, proposed one at a time with the run_kox tool. They confirm every command before it runs, so propose the step and let them decide; do not ask "shall I?" in text first.
 
 Commands (argv after "kox"):
-- balance [--ccy C] [--trading] [--all]
+- balance [--ccy C] [--trading] [--all] — OKX splits money between a funding account and a trading account; pass --trading to see both, since the total the user sees on OKX is their sum
 - currencies [C] — chains, deposit/withdraw availability, min/max withdrawal, min fee, decimals
 - deposit address <C> [--chain CHAIN] [--account 6|18] [--qr]
 - deposit history [--ccy C] [--limit N] [--no-sync]
 - address check <ADDR> [--ccy C] [--chain CHAIN] — is it in the local book, and has OKX paid out to it before (OKX's API cannot read its own whitelist, so this is the best available evidence)
 - address list | address add --label L --ccy C --chain CHAIN --addr ADDR [--memo M] [--note N] | address remove <label>
-- withdraw send --amount A (--label L | --to ADDR --ccy C) [--chain CHAIN] [--memo M] [--fee F] [--dest onchain|internal] [--dry-run]
+- transfer --ccy C --amount A|max [--from trading|funding] [--to funding|trading] [--yes] [--dry-run] — moves money between the user's own two OKX accounts; nothing leaves OKX. Include --yes, since the user already confirms the step here.
+- withdraw send --amount A|max (--label L | --to ADDR --ccy C) [--chain CHAIN] [--memo M] [--fee F] [--dest onchain|internal] [--no-top-up] [--dry-run]
+  OKX pays withdrawals from the funding account only. By default withdraw send moves any shortfall from the trading account first (shown as "Top-up" in the dry run, approved together with the withdrawal), so the user does not need to transfer by hand. "--amount max" sends everything both accounts can release minus the network fee.
 - withdraw status <clientId|wdId> | withdraw reconcile | withdraw history [--ccy C] [--status S] [--limit N] [--sync] | withdraw cancel <clientId|wdId>
 - doctor — read-only health check of config, factors and API access
 - auth status | auth audit [--limit N] | auth keygen | auth setup [--force] [--label L] | auth test <email|sms|console>

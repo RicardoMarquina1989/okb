@@ -102,6 +102,17 @@ kox withdraw send --label cold --amount 100             # the real thing
 kox withdraw send --label exch --amount 50 --dest internal
 ```
 
+OKX pays withdrawals out of the **funding** account only. If funding is short, `withdraw send` first
+moves the difference over from the **trading** account; the dry run shows it as `Top-up`, and the same
+approval covers both steps. Pass `--no-top-up` to turn that off. `--amount max` sends everything both
+accounts can release, less the network fee.
+
+```bash
+kox withdraw send --label cold --amount max --dry-run
+kox transfer --ccy USDT --amount 500                    # trading → funding by hand
+kox transfer --ccy USDT --amount max --from funding     # funding → trading
+```
+
 A real withdrawal walks through: summary → type the last 6 characters of the destination address →
 every factor in `AUTH_FACTORS` → submit.
 

@@ -99,6 +99,23 @@ export function startMockOkx({ overrides = {} } = {}) {
           return send(200, ok([{ ccy: b.ccy, chain: b.chain, amt: b.amt, wdId, clientId: b.clientId }]));
         }
 
+        case 'GET /api/v5/account/max-withdrawal':
+          return send(200, ok([{ ccy: 'USDT', maxWd: '800.1234567' }]));
+
+        case 'POST /api/v5/asset/transfer': {
+          const b = JSON.parse(body);
+          const transId = String(50000 + MOCK_TR.size);
+          MOCK_TR.set(transId, { transId, clientId: b.clientId, ccy: b.ccy, amt: b.amt, from: b.from, to: b.to, type: b.type, state: 'success' });
+          return send(200, ok([{ transId, ccy: b.ccy, clientId: b.clientId, from: b.from, amt: b.amt, to: b.to }]));
+        }
+
+        case 'GET /api/v5/asset/transfer-state': {
+          const rec = [...MOCK_TR.values()].find(
+            (t) => t.transId === params.get('transId') || (params.get('clientId') && t.clientId === params.get('clientId')),
+          );
+          return send(200, ok(rec ? [rec] : []));
+        }
+
         default:
           return send(404, { code: '51000', msg: `unmocked route ${req.method} ${path}` });
       }
@@ -106,6 +123,7 @@ export function startMockOkx({ overrides = {} } = {}) {
   });
 
   const MOCK_WD = new Map();
+  const MOCK_TR = new Map();
 
   return new Promise((resolve) => {
     server.listen(0, '127.0.0.1', () => {
@@ -113,6 +131,7 @@ export function startMockOkx({ overrides = {} } = {}) {
         baseUrl: `http://127.0.0.1:${server.address().port}`,
         calls,
         withdrawals: MOCK_WD,
+        transfers: MOCK_TR,
         rateLimitNext: (n) => (failNext = n),
         close: () => new Promise((r) => server.close(r)),
       });
