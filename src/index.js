@@ -193,7 +193,10 @@ async function main() {
     } else if (err instanceof OkxError) {
       log.error(err.message);
       if (err.code === '58207') {
-        log.plain('  → the address is not on your OKX withdrawal whitelist; add it in the OKX web UI first');
+        log.plain(
+          '  → the address is missing or not yet verified in your OKX withdrawal address book; ' +
+            'add it there and click "Verify" (choose permanent). The API only pays out to verified addresses.',
+        );
       } else if (err.code === '50113' || err.code === '50111') {
         log.plain('  → signature/key rejected: check OKX_API_KEY, OKX_API_SECRET and the machine clock');
       } else if (err.code === '50114') {

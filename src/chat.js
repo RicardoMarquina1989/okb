@@ -83,13 +83,22 @@ const closePrompt = () => {
   rl = null;
 };
 
-/** Run kox attached to the terminal so the user can answer its prompts directly. */
+/**
+ * Run kox attached to the terminal so the user can answer its prompts directly.
+ * stdout (prompts, secrets) stays with the user; stderr carries only kox's
+ * warnings and errors, so it is echoed and also returned for Claude.
+ */
 function runInTerminal(args) {
   closePrompt();
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [CLI, ...args], { cwd: config.root, stdio: 'inherit' });
-    child.on('error', (err) => resolve({ code: 1, error: err.message }));
-    child.on('close', (code) => resolve({ code }));
+    const child = spawn(process.execPath, [CLI, ...args], { cwd: config.root, stdio: ['inherit', 'inherit', 'pipe'] });
+    let errors = '';
+    child.stderr.on('data', (chunk) => {
+      process.stderr.write(chunk);
+      errors += chunk.toString();
+    });
+    child.on('error', (err) => resolve({ code: 1, errors: err.message }));
+    child.on('close', (code) => resolve({ code, errors: errors.replace(/\x1b\[[0-9;]*m/g, '').trim() }));
   }).finally(openPrompt);
 }
 
@@ -128,7 +137,7 @@ const TOOL = {
     'Propose one kox command. The user sees the command and your explanation and must confirm before it runs. ' +
     'Read-only commands return their output to you. Commands that prompt for input (withdraw send without ' +
     '--dry-run, withdraw cancel, address add/remove, auth keygen/setup/test) run in the user\'s terminal and ' +
-    'you only get the exit code. If the user declines, the result contains any feedback they typed.',
+    'you only get the exit code plus any warnings and errors it printed. If the user declines, the result contains any feedback they typed.',
   strict: true,
   input_schema: {
     type: 'object',
@@ -182,11 +191,11 @@ async function handleToolUse(block) {
   }
 
   if (cmd.terminal) {
-    const { code, error } = await runInTerminal(args);
+    const { code, errors } = await runInTerminal(args);
     return result(
       `Exit code ${code} (${EXIT_MEANING[code] ?? 'error'}). ` +
-        (error ? `Spawn error: ${error}. ` : '') +
-        'The command ran in the user\'s terminal; its output was shown only to them.',
+        'The command ran in the user\'s terminal; its normal output was shown only to them.' +
+        (errors ? `\nWarnings and errors it printed:\n${errors}` : ''),
     );
   }
 
@@ -216,7 +225,7 @@ Commands (argv after "kox"):
 - auth status | auth audit [--limit N] | auth keygen | auth setup [--force] [--label L] | auth test <email|sms|console>
 Put "--simulated" as the first argument to use OKX demo trading. Chains are named like "USDT-TRC20", "USDT-ERC20", "BTC-Bitcoin"; check with currencies when unsure.
 
-How kox protects withdrawals: destinations must be saved in the local address book first (address add, which itself needs approval), and every withdrawal, address add and cancel asks the user to type the last 6 characters of the address and enter their authenticator code. Those prompts happen inside the command in the user's terminal. Never ask the user to tell you codes, API keys, secrets or passphrases, and never put them in arguments. The address must also be on the user's OKX withdrawal whitelist (error 58207 means it is not; that can only be fixed in OKX's own settings).
+How kox protects withdrawals: destinations must be saved in the local address book first (address add, which itself needs approval), and every withdrawal and address add asks the user to type the last 6 characters of the address and enter their authenticator code; withdraw cancel asks for a yes and the authenticator code; address remove and transfer (without --yes) ask only for a yes. Those prompts happen inside the command in the user's terminal. Never ask the user to tell you codes, API keys, secrets or passphrases, and never put them in arguments. The address must also be saved and verified in the user's OKX withdrawal address book; OKX's API only pays out to verified addresses, even ones the user has withdrawn to on the website before. Error 58207 means it is missing or not yet verified (an unverified address shows a "Verify" button in OKX), and it can only be fixed in OKX's own settings. Address-book nicknames in kox and in OKX are independent and need not match; the "address:label" in that error refers to a memo/tag, not the nickname.
 
 Working rules:
 - Use only addresses, amounts and labels the user gave you or that came from command output. Never invent or "fix" an address.
